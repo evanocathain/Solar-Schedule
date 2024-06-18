@@ -4,7 +4,7 @@ Created 31/05/2024
 """
 
 import argparse
-import numpy as np 
+# import numpy as np 
 import astropy.units as u
 from astropy.time import Time
 from astropy.coordinates import get_sun, EarthLocation, AltAz
@@ -12,9 +12,27 @@ from astropy.coordinates import get_sun, EarthLocation, AltAz
 from datetime import datetime, timedelta, timezone
 import subprocess
 
-process = subprocess.Popen(['./sun_flare_prob'],stdout=subprocess.PIPE)
-result  = process.communicate()
-print(result)
+# Function to execute shell script
+def run_shell_script():
+    process = subprocess.Popen(['./sun_flare_prob'],stdout=subprocess.PIPE)
+    # process = subprocess.Popen(['bash', '-c', './sun_flare_prob.sh'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    result, _ = process.communicate()
+    return result.decode().strip()
+
+# Run shell script
+flare_probs = run_shell_script()
+
+def parse_flare_probs(flare_probs):
+    # Split the flare_probs string by spaces
+    probs = flare_probs.split()
+    # Check if there's exactly two values
+    if len(probs) == 2:
+        noaa_prob = int(probs[0])
+        mcstat_prob = int(probs[1])
+        return {'NOAA': noaa_prob, 'MCSTAT': mcstat_prob}
+
+# Parse the ouput
+categories = parse_flare_probs(flare_probs)
 
 # Function to round to the nearest 10 minutes
 def minutes_rounded(dt):
@@ -27,7 +45,7 @@ def day_rounded(dt):
     # Set to 1 minute past midnight UTC on date in question
     return dt.replace(hour=0,minute=0, second=0, microsecond=0) + timedelta(hours=0,minutes=1) 
 
-def main (horizon, plot):
+def main (horizon, plot, date):
   # Set up Observer, Target, and observation time objects
   longitude = -7.9219 * u.deg
   latitude = 53.0950 * u.deg
@@ -38,11 +56,15 @@ def main (horizon, plot):
   #                    location=location,
   #                    description="LOFAR Station IE613")
   
-  # Define the observation times, use only UTC
-  start_time = day_rounded(datetime.now(timezone.utc))
-  end_time = start_time + timedelta(days=2)
+ # Define the observation times, use only UTC
+  if date:
+      start_time = day_rounded(datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=timezone.utc))
+  else:
+      start_time = day_rounded(datetime.now(timezone.utc))
+    
+  end_time = start_time + timedelta(days=1)
   delta_t = timedelta(minutes=10)  # time step
-  times = np.arange(start_time, end_time, delta_t).astype(datetime)
+  times = [start_time + i * delta_t for i in range(int((end_time - start_time) / delta_t))]
   
   # Convert times to astropy Time objects
   astropy_times = Time(times)
@@ -76,8 +98,8 @@ def main (horizon, plot):
   # Print the observation periods
   if observation_periods:
     # Format the observation periods to exlude periods below horizon in a 24hr cycle
-    periods_str = ' and '.join([f'{start.strftime("%Y-%m-%d %H:%M:%S")} to {end.strftime("%Y-%m-%d %H:%M:%S")}' for start, end in observation_periods])
-    print(f'Observe during the following periods: {periods_str}')
+    periods_str = ' and '.join([f'{start.strftime("%Y-%m-%dT%H:%M")} - {end.strftime("%Y-%m-%dT%H:%M")}' for start, end in observation_periods])
+    print(f'{periods_str} : [Sun357] # Flare probs: {categories.get("MCSTAT")}% MCSTAT {categories.get("NOAA")}% NOAA ')
   else:
     print('The sun does not rise above the specified horizon today.')
   
@@ -100,11 +122,12 @@ def parse_arguments():
   parser = argparse.ArgumentParser(description='Plot sun elevation over time.') # create argument parser
   parser.add_argument('-horizon', type=float, default=30.0, help='Horizon angle (degrees) for filtering sun elevation') # add argument for horizon
   parser.add_argument('-plot', action='store_true',default=False, help='Plot solar elevation for next 24 hours')
+  parser.add_argument('-date', type=str, help='Date to calculate sun elevation for (format: YYYY-MM-DD)', default=None)
   return parser.parse_args()
 
 # Run script with specified horizon angle
 if __name__ == '__main__':
   args = parse_arguments() # call function to parse command line arguments
-  main(args.horizon, args.plot) # call main function
+  main(args.horizon, args.plot, args.date) # call main function
 
 
